@@ -2,7 +2,32 @@ package com.redis
 
 import java.net.SocketException
 
-import com.redis.serialization.Format
+import com.redis.Commands.MULTI
+import com.redis.serialization.{Format, Parse}
+import shapeless.ops.hlist
+import shapeless.ops.hlist.{LeftFolder, Mapper, RightFolder}
+import shapeless.{::, HList, HNil, Poly1, Poly2}
+import shapeless.tag._
+
+import scala.collection.immutable.Set
+trait WithSet
+object MyMapper extends Poly2 {
+
+  implicit def toShit[T: Parse, ACC <: HList]: Case.Aux[
+    (ACC, RedisClient),
+    Parse[T],
+    (Option[T] :: ACC, RedisClient)
+  ] = at{ case ((acc, r), _) => (r.asBulk :: acc) -> r
+  }
+
+  implicit def detGårInte[T, ACC <: HList](implicit parse: Parse[T]): Case.Aux[
+    (ACC, RedisClient),
+    Parse[T] @@ WithSet,
+    (Option[Set[T]] :: ACC, RedisClient)
+  ] = at {
+    case ((acc, c), _) => (c.asSet.map{ _.flatten } :: acc) -> c
+  }
+}
 
 object RedisClient {
   trait SortOrder
@@ -90,6 +115,8 @@ trait RedisCommand extends Redis with Operations
   }
   
 }
+
+case class Arger(cmd: String, format: Format, args: List[Any])
   
 
 class RedisClient(override val host: String, override val port: Int,
@@ -127,6 +154,48 @@ class RedisClient(override val host: String, override val port: Int,
         None
     }
   }
+
+  class Pipe[T <: HList](wrappers: T, keys: List[Arger]) {
+    import shapeless.tag
+
+    def getA[A](key: Any)(implicit format: Format, parse: Parse[A]): Pipe[Parse[A] :: T] = {
+      new Pipe(parse :: wrappers, Arger("GET", format, List(key)) :: keys)
+    }
+    def smembersA[A](key: Any)(implicit format: Format, p: Parse[A]): Pipe[(Parse[A] @@ WithSet) :: T] = {
+      new Pipe(tag[WithSet](p) :: wrappers, Arger("SMEMBERS", format, List(key)) :: keys)
+    }
+
+    def execute[U <: HList](implicit foldLeft: LeftFolder.Aux[
+      T,
+      (HNil, RedisClient),
+      MyMapper.type,
+      (U, RedisClient)
+    ]): U = {
+      def rec() = receive(singleLineReply).foreach(arr => ifDebug(Parse.parseStringSafe.apply(arr)))
+      send("MULTI")(rec()) // flush reply stream
+
+      keys.foreach{ case Arger(command, format, args) =>
+        write(Commands.multiBulk(command.getBytes("UTF-8") +: (args map format.apply)))
+        rec()
+      }
+
+      import Parse.{Implicits => Parsers}
+
+      val handler: PartialFunction[(Char, Array[Byte]), Option[U]] = {
+        case (MULTI, str) =>
+          Parsers.parseInt(str) match {
+            case -1 => None
+            case n => Some({
+              wrappers.foldLeft((HNil: HNil) -> RedisClient.this)(MyMapper)._1
+            })
+          }
+      }
+
+      send("EXEC")(receive(handler)).getOrElse(throw RedisConnectionException("Batorv"))
+    }
+  }
+
+  def pipe = new Pipe[HNil](HNil, Nil)
   
   import scala.concurrent.ExecutionContext.Implicits.global
   import scala.concurrent.{Future, Promise}

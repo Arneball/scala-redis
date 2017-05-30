@@ -25,6 +25,9 @@ object ScalaRedisProject extends Build
       "org.slf4j"         %  "slf4j-log4j12"           % "1.7.2"      % "provided",
       "log4j"             %  "log4j"                   % "1.2.16"     % "provided",
       "junit"             %  "junit"                   % "4.8.1"      % "test",
+      // https://mvnrepository.com/artifact/com.chuusai/shapeless_2.12
+      "com.chuusai" %% "shapeless" % "2.3.2",
+
       "org.scalatest"     %%  "scalatest"              % "3.0.0" % "test"),
 
     libraryDependencies += {

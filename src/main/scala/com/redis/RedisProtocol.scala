@@ -137,7 +137,7 @@ private [redis] trait Reply {
     case null => 
       throw new RedisConnectionException("Connection dropped ..")
     case line =>
-      (pf orElse errReply) apply ((line(0).toChar,line.slice(1,line.length)))
+      (pf orElse errReply) apply ((line.head.toChar, line.tail))
   }
 
   /**
